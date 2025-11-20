@@ -1,6 +1,5 @@
+# Livestream playback
 
-Livestream playback
-===================
 You need to provide a livestream URL in `MediaDataSource` and indicates `isLive: true`.
 
 Sample MPEG2-TS over HTTP source:
@@ -39,11 +38,13 @@ Or a WebSocket source:
 ## HTTP MPEG2-TS/FLV live stream
 
 ### CORS
+
 You must configure `Access-Control-Allow-Origin` header correctly on your stream server.
 
 See [cors.md](../docs/cors.md) for details.
 
 ### Compatibility
+
 Due to IO restrictions, mpegts.js can support HTTP MPEG2-TS/FLV live stream on `Chrome 43+`, `FireFox 42+`, `Edge 15.15048+` and `Safari 10.1+` for now.
 
 HTTP MPEG2-TS/FLV live stream relies on stream IO, which has been introduced in [fetch][] and [stream][] spec. Now `FetchStreamLoader` works well on most of the modern browsers:

@@ -1,6 +1,5 @@
+# CORS Configuration
 
-CORS Configuration
-==================
 Anytime you want to play an MPEG2-TS/FLV stream from another `Origin`, the server must response with a CORS header:
 
 ```
@@ -20,6 +19,7 @@ Access-Control-Allow-Origin: *
 ```
 
 ## Static MPEG2-TS/FLV file playback
+
 For static MPEG2-TS/FLV file playback, we recommend you to add:
 
 ```
@@ -29,6 +29,7 @@ Access-Control-Expose-Headers: Content-Length
 Or you should provide accurate filesize in **MediaDataSource** object.
 
 ## CORS with 301/302 redirect
+
 If your video server response with a 3xx redirection, the redirection's response headers **must** contains `Access-Control-Allow-Origin`;
 
 Obviously the redirect target server should also response with CORS headers, but pay attention that the browser will send `Origin: null` in redirected request according to current CORS policy.
@@ -42,6 +43,7 @@ Access-Control-Allow-Origin: null | *
 Or you can determine by request header `Origin` dynamically.
 
 ## Preflight OPTIONS for Range seek
+
 When use Range seek for cross-origin MPEG2-TS/FLV file, `Range` header added by mpegts.js will cause a [Preflight OPTIONS][] request by the browser.
 
 The browser will send an `OPTIONS` request before actual `GET` request, with following additional headers according to CORS policy:
@@ -62,6 +64,7 @@ Access-Control-Allow-Headers: range
 [Preflight OPTIONS]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Access_control_CORS#Preflighted_requests
 
 ## Reference
+
 We strongly advise you to read [HTTP access control (CORS)][] and [CORS spec][] document carefully.
 
 [HTTP access control (CORS)]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Access_control_CORS

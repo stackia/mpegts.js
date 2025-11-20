@@ -1,7 +1,7 @@
 export class MP3Data {
-    object_type: number;
-    sample_rate: number;
-    channel_count: number;
+  object_type: number;
+  sample_rate: number;
+  channel_count: number;
 
-    data: Uint8Array;
+  data: Uint8Array;
 }

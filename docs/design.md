@@ -1,6 +1,4 @@
-
-flv.js design
-======
+# flv.js design
 
 Architecture overview:
 

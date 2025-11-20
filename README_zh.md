@@ -1,5 +1,5 @@
-mpegts.js  [![npm](https://img.shields.io/npm/v/mpegts.js.svg?style=flat)](https://www.npmjs.com/package/mpegts.js)
-======
+# mpegts.js [![npm](https://img.shields.io/npm/v/mpegts.js.svg?style=flat)](https://www.npmjs.com/package/mpegts.js)
+
 [日本語](README_ja.md)
 
 mpegts.js 是在 HTML5 上直接播放 MPEG2-TS 流的播放器，针对低延迟直播优化，可用于 DVB/ISDB 数字电视流或监控摄像头等的低延迟回放。
@@ -7,47 +7,51 @@ mpegts.js 是在 HTML5 上直接播放 MPEG2-TS 流的播放器，针对低延�
 mpegts.js 基于 [flv.js](https://github.com/bilibili/flv.js) 改造而来。
 
 ## Overview
+
 mpegts.js 通过在 JavaScript 中渐进化解析 MPEG2-TS 流并实时转封装为 ISO BMFF (Fragmented MP4)，然后通过 [Media Source Extensions][] 把音视频数据喂入 HTML5 `<video>` 元素。
 
 [Media Source Extensions]: https://w3c.github.io/media-source/
 
 ## News
+
 - **v1.8.0**
 
-    支持在 **iOS Safari**（iOS 17.1+）上运行，使用 Apple [ManagedMediaSource API](https://github.com/w3c/media-source/issues/320)
+  支持在 **iOS Safari**（iOS 17.1+）上运行，使用 Apple [ManagedMediaSource API](https://github.com/w3c/media-source/issues/320)
 
-    通过使用 [MSE in Workers](https://github.com/w3c/media-source/issues/175) 来显著提升性能（适用于 Chrome 和 Safari 18，包括 iOS）
+  通过使用 [MSE in Workers](https://github.com/w3c/media-source/issues/175) 来显著提升性能（适用于 Chrome 和 Safari 18，包括 iOS）
 
-    支持 [AV1 over MPEG-TS](https://aomediacodec.github.io/av1-mpeg2-ts/)
+  支持 [AV1 over MPEG-TS](https://aomediacodec.github.io/av1-mpeg2-ts/)
 
-    支持 AV1 over HTTP-FLV，定义于 [Enhanced RTMP](https://github.com/veovera/enhanced-rtmp)
+  支持 AV1 over HTTP-FLV，定义于 [Enhanced RTMP](https://github.com/veovera/enhanced-rtmp)
 
-    支持更平滑的直播延迟追赶（通过动态改变播放速率）
+  支持更平滑的直播延迟追赶（通过动态改变播放速率）
 
-    MPEG-TS 新增 ATSC EAC-3 音频支持
+  MPEG-TS 新增 ATSC EAC-3 音频支持
 
-    HTTP-FLV（Enhanced RTMP）新增 Opus 和 FLAC 音频支持
+  HTTP-FLV（Enhanced RTMP）新增 Opus 和 FLAC 音频支持
 
 - **v1.7.3**
 
-    支持 [Enhanced RTMP] 中关于 FLV 传输 HEVC 的规范
+  支持 [Enhanced RTMP] 中关于 FLV 传输 HEVC 的规范
 
-    MPEG-TS 新增了对 Opus 和 ATSC AC-3 音频编码支持
+  MPEG-TS 新增了对 Opus 和 ATSC AC-3 音频编码支持
 
-    MPEG-TS 新增了 LOAS AAC 播放支持
+  MPEG-TS 新增了 LOAS AAC 播放支持
 
 - **v1.7.0**
 
-    H.265/HEVC 播放支持（FLV 或 MPEG-TS 均已支持）
+  H.265/HEVC 播放支持（FLV 或 MPEG-TS 均已支持）
 
 [Enhanced RTMP]: https://github.com/veovera/enhanced-rtmp
 
 ## Demo
+
 [http://xqq.github.io/mpegts.js/demo/](http://xqq.github.io/mpegts.js/demo/)
 
 [demo with aribb24.js](http://xqq.github.io/mpegts.js/demo/arib.html)
 
 ## Features
+
 - 回放 http(s) 或 WebSocket 上承载的 H.264/H.265 + AAC 编码的 MPEG2-TS 流
 - 回放 http(s) 或 WebSocket 上承载的 H.264/H.265 + AAC 编码的 FLV 流
 - 超低延迟，最佳情况延迟可低达 1 秒以内
@@ -62,16 +66,19 @@ mpegts.js 通过在 JavaScript 中渐进化解析 MPEG2-TS 流并实时转封装
 [aribb24.js]: https://github.com/monyone/aribb24.js
 
 ## CORS
+
 若在与页面不同的独立的服务器串流，必须设置 CORS 的 `Access-Control-Allow-Origin` 头。
 
 参阅 [cors.md](docs/cors.md)。
 
 ## Installation
+
 ```bash
 npm install --save mpegts.js
 ```
 
 ## Build
+
 ```bash
 npm install                 # install dev-dependencies
 npm install -g webpack-cli  # install build tool
@@ -81,34 +88,39 @@ npm run build               # packaged & minimized js will be emitted in dist fo
 若在中国大陆可尝试 [cnpm](https://github.com/cnpm/cnpm) 镜像。
 
 ## Getting Started
+
 ```html
 <script src="mpegts.js"></script>
 <video id="videoElement"></video>
 <script>
-    if (mpegts.getFeatureList().mseLivePlayback) {
-        var videoElement = document.getElementById('videoElement');
-        var player = mpegts.createPlayer({
-            type: 'mse',  // could also be mpegts, m2ts, flv
-            isLive: true,
-            url: 'http://example.com/live/livestream.ts'
-        });
-        player.attachMediaElement(videoElement);
-        player.load();
-        player.play();
-    }
+  if (mpegts.getFeatureList().mseLivePlayback) {
+    var videoElement = document.getElementById("videoElement");
+    var player = mpegts.createPlayer({
+      type: "mse", // could also be mpegts, m2ts, flv
+      isLive: true,
+      url: "http://example.com/live/livestream.ts",
+    });
+    player.attachMediaElement(videoElement);
+    player.load();
+    player.play();
+  }
 </script>
 ```
+
 可使用 [Simple Realtime Server](https://github.com/ossrs/srs/) 来测试 mpegts.js。
 
 ## TODO
+
 - MPEG2-TS 静态文件回放 （目前还不支持 seek）
 
 ## Limitations
+
 - 不支持 mpeg2video
 - IE11 等旧浏览器不支持 HTTP MPEG2-TS/FLV 直播流回放
 - iOS 由于屏蔽了 [Media Source Extensions][] 因而无法使用，但在 iPadOS 上可用
 
 ## Features inherited from flv.js
+
 - H.264 + AAC / MP3 编码的 FLV 文件回放
 - 多分段 FLV 视频无缝播放
 - HTTP FLV 低延迟直播流回放
@@ -117,19 +129,24 @@ npm run build               # packaged & minimized js will be emitted in dist fo
 - 超低开销并且由你的浏览器硬件加速
 
 ## FLV playback limitations
+
 - MP3 编码在 IE11 和旧版 Edge 上不受支持
 - HTTP FLV 直播不支持部分旧浏览器，参阅 [livestream.md](docs/livestream.md)
 
 ## FLV Multipart playback
+
 多段播放需要在 `MediaDataSource` 中提供文件列表。参阅 [multipart.md](docs/multipart.md)
 
 ## Livestream playback
+
 参阅 [livestream.md](docs/livestream.md)
 
 ## API and Configuration
+
 参阅 [api.md](docs/api.md)
 
 ## Debug
+
 ```bash
 npm install                 # install dev-dependencies
 npm install -g webpack-cli  # install build tool
@@ -137,9 +154,11 @@ npm run build:debug         # packaged & minimized js will be emitted in dist fo
 ```
 
 ## Design
+
 参阅 [design.md](docs/design.md)
 
 ## License
+
 ```
 Copyright (C) 2021 magicxqq. All Rights Reserved.
 
