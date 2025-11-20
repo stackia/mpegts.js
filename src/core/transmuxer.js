@@ -35,7 +35,7 @@ class Transmuxer {
         this._workerDestroying = false;
         this._worker.addEventListener(
           "message",
-          this._onWorkerMessage.bind(this),
+          this._onWorkerMessage.bind(this)
         );
         this._worker.postMessage({
           cmd: "init",
@@ -52,7 +52,7 @@ class Transmuxer {
       } catch (error) {
         Log.e(
           this.TAG,
-          "Error while initialize transmuxing worker, fallback to inline transmuxing",
+          "Error while initialize transmuxing worker, fallback to inline transmuxing"
         );
         this._worker = null;
         this._controller = new TransmuxingController(mediaDataSource, config);
@@ -69,56 +69,56 @@ class Transmuxer {
       ctl.on(TransmuxingEvents.MEDIA_SEGMENT, this._onMediaSegment.bind(this));
       ctl.on(
         TransmuxingEvents.LOADING_COMPLETE,
-        this._onLoadingComplete.bind(this),
+        this._onLoadingComplete.bind(this)
       );
       ctl.on(
         TransmuxingEvents.RECOVERED_EARLY_EOF,
-        this._onRecoveredEarlyEof.bind(this),
+        this._onRecoveredEarlyEof.bind(this)
       );
       ctl.on(TransmuxingEvents.MEDIA_INFO, this._onMediaInfo.bind(this));
       ctl.on(
         TransmuxingEvents.METADATA_ARRIVED,
-        this._onMetaDataArrived.bind(this),
+        this._onMetaDataArrived.bind(this)
       );
       ctl.on(
         TransmuxingEvents.SCRIPTDATA_ARRIVED,
-        this._onScriptDataArrived.bind(this),
+        this._onScriptDataArrived.bind(this)
       );
       ctl.on(
         TransmuxingEvents.TIMED_ID3_METADATA_ARRIVED,
-        this._onTimedID3MetadataArrived.bind(this),
+        this._onTimedID3MetadataArrived.bind(this)
       );
       ctl.on(
         TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED,
-        this._onSynchronousKLVMetadataArrived.bind(this),
+        this._onSynchronousKLVMetadataArrived.bind(this)
       );
       ctl.on(
         TransmuxingEvents.ASYNCHRONOUS_KLV_METADATA_ARRIVED,
-        this._onAsynchronousKLVMetadataArrived.bind(this),
+        this._onAsynchronousKLVMetadataArrived.bind(this)
       );
       ctl.on(
         TransmuxingEvents.SMPTE2038_METADATA_ARRIVED,
-        this._onSMPTE2038MetadataArrived.bind(this),
+        this._onSMPTE2038MetadataArrived.bind(this)
       );
       ctl.on(
         TransmuxingEvents.SCTE35_METADATA_ARRIVED,
-        this._onSCTE35MetadataArrived.bind(this),
+        this._onSCTE35MetadataArrived.bind(this)
       );
       ctl.on(
         TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR,
-        this._onPESPrivateDataDescriptor.bind(this),
+        this._onPESPrivateDataDescriptor.bind(this)
       );
       ctl.on(
         TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED,
-        this._onPESPrivateDataArrived.bind(this),
+        this._onPESPrivateDataArrived.bind(this)
       );
       ctl.on(
         TransmuxingEvents.STATISTICS_INFO,
-        this._onStatisticsInfo.bind(this),
+        this._onStatisticsInfo.bind(this)
       );
       ctl.on(
         TransmuxingEvents.RECOMMEND_SEEKPOINT,
-        this._onRecommendSeekpoint.bind(this),
+        this._onRecommendSeekpoint.bind(this)
       );
     }
   }
@@ -250,7 +250,7 @@ class Transmuxer {
     Promise.resolve().then(() => {
       this._emitter.emit(
         TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED,
-        data,
+        data
       );
     });
   }
@@ -259,7 +259,7 @@ class Transmuxer {
     Promise.resolve().then(() => {
       this._emitter.emit(
         TransmuxingEvents.ASYNCHRONOUS_KLV_METADATA_ARRIVED,
-        data,
+        data
       );
     });
   }

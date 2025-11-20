@@ -86,7 +86,7 @@
     </div>
 
     <script type="module">
-      import mpegts from "../src/index.js";
+      import mpegts from "../src/mpegts.js";
       window.mpegts = mpegts;
     </script>
 
@@ -142,7 +142,7 @@
           lazyLoadMaxDuration: 3 * 60,
           seekType: "range",
           liveBufferLatencyChasing: document.getElementById(
-            "liveBufferLatencyChasing",
+            "liveBufferLatencyChasing"
           ).checked,
         });
         player.attachMediaElement(element);

@@ -158,11 +158,11 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
     // For media_info / statistics_info event, trigger it immediately
     if (event === PlayerEvents.MEDIA_INFO && this._media_info) {
       Promise.resolve().then(() =>
-        this._emitter.emit(PlayerEvents.MEDIA_INFO, this.mediaInfo),
+        this._emitter.emit(PlayerEvents.MEDIA_INFO, this.mediaInfo)
       );
     } else if (event == PlayerEvents.STATISTICS_INFO && this._statistics_info) {
       Promise.resolve().then(() =>
-        this._emitter.emit(PlayerEvents.STATISTICS_INFO, this.statisticsInfo),
+        this._emitter.emit(PlayerEvents.STATISTICS_INFO, this.statisticsInfo)
       );
     }
   }
@@ -182,15 +182,15 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
 
     this._media_element.addEventListener(
       "loadedmetadata",
-      this.e.onMediaLoadedMetadata,
+      this.e.onMediaLoadedMetadata
     );
     this._media_element.addEventListener(
       "timeupdate",
-      this.e.onMediaTimeUpdate,
+      this.e.onMediaTimeUpdate
     );
     this._media_element.addEventListener(
       "readystatechange",
-      this.e.onMediaReadyStateChanged,
+      this.e.onMediaReadyStateChanged
     );
 
     this._worker.postMessage({
@@ -209,15 +209,15 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
       // Remove all appended event listeners
       this._media_element.removeEventListener(
         "loadedmetadata",
-        this.e.onMediaLoadedMetadata,
+        this.e.onMediaLoadedMetadata
       );
       this._media_element.removeEventListener(
         "timeupdate",
-        this.e.onMediaTimeUpdate,
+        this.e.onMediaTimeUpdate
       );
       this._media_element.removeEventListener(
         "readystatechange",
-        this.e.onMediaReadyStateChanged,
+        this.e.onMediaReadyStateChanged
       );
 
       // Detach media source from media element
@@ -237,33 +237,33 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
     this._seeking_handler = new SeekingHandler(
       this._config,
       this._media_element,
-      this._onRequiredUnbufferedSeek.bind(this),
+      this._onRequiredUnbufferedSeek.bind(this)
     );
 
     this._loading_controller = new LoadingController(
       this._config,
       this._media_element,
       this._onRequestPauseTransmuxer.bind(this),
-      this._onRequestResumeTransmuxer.bind(this),
+      this._onRequestResumeTransmuxer.bind(this)
     );
 
     this._startup_stall_jumper = new StartupStallJumper(
       this._media_element,
-      this._onRequestDirectSeek.bind(this),
+      this._onRequestDirectSeek.bind(this)
     );
 
     if (this._config.isLive && this._config.liveBufferLatencyChasing) {
       this._live_latency_chaser = new LiveLatencyChaser(
         this._config,
         this._media_element,
-        this._onRequestDirectSeek.bind(this),
+        this._onRequestDirectSeek.bind(this)
       );
     }
 
     if (this._config.isLive && this._config.liveSync) {
       this._live_latency_synchronizer = new LiveLatencySynchronizer(
         this._config,
-        this._media_element,
+        this._media_element
       );
     }
 
@@ -431,7 +431,7 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
           this._media_info = packet.info;
           this._emitter.emit(
             PlayerEvents.MEDIA_INFO,
-            Object.assign({}, packet.info),
+            Object.assign({}, packet.info)
           );
         } else if (packet.event == TransmuxingEvents.STATISTICS_INFO) {
           const packet =
@@ -439,7 +439,7 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
           this._statistics_info = this._fillStatisticsInfo(packet.info);
           this._emitter.emit(
             PlayerEvents.STATISTICS_INFO,
-            Object.assign({}, packet.info),
+            Object.assign({}, packet.info)
           );
         } else if (packet.event == TransmuxingEvents.RECOMMEND_SEEKPOINT) {
           const packet =
@@ -458,7 +458,7 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
             PlayerEvents.ERROR,
             packet.error_type,
             packet.error_detail,
-            packet.info,
+            packet.info
           );
         } else if ("extraData" in packet) {
           const packet =
@@ -476,7 +476,7 @@ class PlayerEngineDedicatedThread implements PlayerEngine {
         const packet =
           message_packet as WorkerMessagePacketBufferedPositionChanged;
         this._loading_controller.notifyBufferedPositionChanged(
-          packet.buffered_position_milliseconds / 1000,
+          packet.buffered_position_milliseconds / 1000
         );
         break;
       }
