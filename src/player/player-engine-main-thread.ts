@@ -33,6 +33,13 @@ import LoadingController from "./loading-controller";
 import StartupStallJumper from "./startup-stall-jumper";
 import LiveLatencyChaser from "./live-latency-chaser";
 import LiveLatencySynchronizer from "./live-latency-synchronizer";
+import { SoftAudioDecoderManager } from "../decoder/soft-audio-decoder";
+import {
+  identifyAudioCodec,
+  needsSoftwareDecode,
+  SoftDecodeAudioCodec,
+} from "../decoder/codec-support";
+import type { RawAudioFrame } from "../demux/ts-demuxer";
 
 class PlayerEngineMainThread implements PlayerEngine {
   private readonly TAG: string = "PlayerEngineMainThread";
@@ -61,6 +68,11 @@ class PlayerEngineMainThread implements PlayerEngine {
   private _media_info?: MediaInfo = null;
   private _statistics_info?: any = null;
 
+  // Soft audio decoder support
+  private _soft_audio_decoder?: SoftAudioDecoderManager = null;
+  private _soft_decode_codec?: SoftDecodeAudioCodec = null;
+  private _soft_decode_pending_init: boolean = false;
+
   private e?: any = null;
 
   public constructor(mediaDataSource: any, config: any) {
@@ -77,6 +89,9 @@ class PlayerEngineMainThread implements PlayerEngine {
 
     this.e = {
       onMediaLoadedMetadata: this._onMediaLoadedMetadata.bind(this),
+      onVolumeChange: this._onVolumeChange.bind(this),
+      onPlay: this._onPlay.bind(this),
+      onPause: this._onPause.bind(this),
     };
   }
 
@@ -88,6 +103,13 @@ class PlayerEngineMainThread implements PlayerEngine {
     if (this._media_element) {
       this.detachMediaElement();
     }
+
+    // Destroy soft audio decoder
+    if (this._soft_audio_decoder) {
+      this._soft_audio_decoder.destroy();
+      this._soft_audio_decoder = null;
+    }
+
     this.e = null;
     this._media_data_source = null;
 
@@ -100,11 +122,11 @@ class PlayerEngineMainThread implements PlayerEngine {
     // For media_info / statistics_info event, trigger it immediately
     if (event === PlayerEvents.MEDIA_INFO && this._media_info) {
       Promise.resolve().then(() =>
-        this._emitter.emit(PlayerEvents.MEDIA_INFO, this.mediaInfo),
+        this._emitter.emit(PlayerEvents.MEDIA_INFO, this.mediaInfo)
       );
     } else if (event == PlayerEvents.STATISTICS_INFO && this._statistics_info) {
       Promise.resolve().then(() =>
-        this._emitter.emit(PlayerEvents.STATISTICS_INFO, this.statisticsInfo),
+        this._emitter.emit(PlayerEvents.STATISTICS_INFO, this.statisticsInfo)
       );
     }
   }
@@ -124,30 +146,35 @@ class PlayerEngineMainThread implements PlayerEngine {
 
     mediaElement.addEventListener(
       "loadedmetadata",
-      this.e.onMediaLoadedMetadata,
+      this.e.onMediaLoadedMetadata
     );
+    // Add event listeners for soft audio decoder sync
+    // Note: seeking event is handled by PCMAudioPlayer directly
+    mediaElement.addEventListener("volumechange", this.e.onVolumeChange);
+    mediaElement.addEventListener("play", this.e.onPlay);
+    mediaElement.addEventListener("pause", this.e.onPause);
 
     this._mse_controller = new MSEController(this._config);
     this._mse_controller.on(
       MSEEvents.UPDATE_END,
-      this._onMSEUpdateEnd.bind(this),
+      this._onMSEUpdateEnd.bind(this)
     );
     this._mse_controller.on(
       MSEEvents.BUFFER_FULL,
-      this._onMSEBufferFull.bind(this),
+      this._onMSEBufferFull.bind(this)
     );
     this._mse_controller.on(
       MSEEvents.SOURCE_OPEN,
-      this._onMSESourceOpen.bind(this),
+      this._onMSESourceOpen.bind(this)
     );
     this._mse_controller.on(MSEEvents.ERROR, this._onMSEError.bind(this));
     this._mse_controller.on(
       MSEEvents.START_STREAMING,
-      this._onMSEStartStreaming.bind(this),
+      this._onMSEStartStreaming.bind(this)
     );
     this._mse_controller.on(
       MSEEvents.END_STREAMING,
-      this._onMSEEndStreaming.bind(this),
+      this._onMSEEndStreaming.bind(this)
     );
 
     this._mse_controller.initialize({
@@ -173,8 +200,19 @@ class PlayerEngineMainThread implements PlayerEngine {
       // Remove all appended event listeners
       this._media_element.removeEventListener(
         "loadedmetadata",
-        this.e.onMediaLoadedMetadata,
+        this.e.onMediaLoadedMetadata
       );
+      this._media_element.removeEventListener(
+        "volumechange",
+        this.e.onVolumeChange
+      );
+      this._media_element.removeEventListener("play", this.e.onPlay);
+      this._media_element.removeEventListener("pause", this.e.onPause);
+
+      // Detach soft audio decoder from video element
+      if (this._soft_audio_decoder) {
+        this._soft_audio_decoder.detachVideo();
+      }
 
       // Detach media source from media element
       this._media_element.src = "";
@@ -194,12 +232,12 @@ class PlayerEngineMainThread implements PlayerEngine {
   public load(): void {
     if (!this._media_element) {
       throw new IllegalStateException(
-        "HTMLMediaElement must be attached before load()!",
+        "HTMLMediaElement must be attached before load()!"
       );
     }
     if (this._transmuxer) {
       throw new IllegalStateException(
-        "load() has been called, please call unload() first!",
+        "load() has been called, please call unload() first!"
       );
     }
     if (this._has_pending_load) {
@@ -218,7 +256,7 @@ class PlayerEngineMainThread implements PlayerEngine {
       TransmuxingEvents.INIT_SEGMENT,
       (type: string, is: any) => {
         this._mse_controller.appendInitSegment(is);
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.MEDIA_SEGMENT,
@@ -234,9 +272,9 @@ class PlayerEngineMainThread implements PlayerEngine {
           this._seeking_handler.appendSyncPoints(ms.info.syncPoints);
         }
         this._loading_controller.notifyBufferedPositionChanged(
-          ms.info.endDts / 1000,
+          ms.info.endDts / 1000
         );
-      },
+      }
     );
     this._transmuxer.on(TransmuxingEvents.LOADING_COMPLETE, () => {
       this._mse_controller.endOfStream();
@@ -252,9 +290,9 @@ class PlayerEngineMainThread implements PlayerEngine {
           PlayerEvents.ERROR,
           ErrorTypes.NETWORK_ERROR,
           detail,
-          info,
+          info
         );
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.DEMUX_ERROR,
@@ -263,9 +301,9 @@ class PlayerEngineMainThread implements PlayerEngine {
           PlayerEvents.ERROR,
           ErrorTypes.MEDIA_ERROR,
           detail,
-          info,
+          info
         );
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.MEDIA_INFO,
@@ -273,15 +311,31 @@ class PlayerEngineMainThread implements PlayerEngine {
         this._media_info = mediaInfo;
         this._emitter.emit(
           PlayerEvents.MEDIA_INFO,
-          Object.assign({}, mediaInfo),
+          Object.assign({}, mediaInfo)
         );
-      },
+
+        // Check if soft audio decoding is needed
+        this._checkAndInitSoftAudioDecoder(mediaInfo);
+      }
     );
+
+    // Handle raw audio data for soft decoding (fallback if worker decode fails)
+    this._transmuxer.on(
+      TransmuxingEvents.RAW_AUDIO_DATA,
+      (frame: RawAudioFrame) => {
+        this._onRawAudioData(frame);
+      }
+    );
+
+    // Handle PCM audio data from worker (decoded in worker)
+    this._transmuxer.on(TransmuxingEvents.PCM_AUDIO_DATA, (pcmData: any) => {
+      this._onPCMAudioData(pcmData);
+    });
     this._transmuxer.on(TransmuxingEvents.STATISTICS_INFO, (statInfo: any) => {
       this._statistics_info = this._fillStatisticsInfo(statInfo);
       this._emitter.emit(
         PlayerEvents.STATISTICS_INFO,
-        Object.assign({}, statInfo),
+        Object.assign({}, statInfo)
       );
     });
     this._transmuxer.on(
@@ -290,7 +344,7 @@ class PlayerEngineMainThread implements PlayerEngine {
         if (this._media_element && !this._config.accurateSeek) {
           this._seeking_handler.directSeek(milliseconds / 1000);
         }
-      },
+      }
     );
     this._transmuxer.on(TransmuxingEvents.METADATA_ARRIVED, (metadata: any) => {
       this._emitter.emit(PlayerEvents.METADATA_ARRIVED, metadata);
@@ -303,98 +357,98 @@ class PlayerEngineMainThread implements PlayerEngine {
       (timed_id3_metadata: any) => {
         this._emitter.emit(
           PlayerEvents.TIMED_ID3_METADATA_ARRIVED,
-          timed_id3_metadata,
+          timed_id3_metadata
         );
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.PGS_SUBTITLE_ARRIVED,
       (pgs_data: any) => {
         this._emitter.emit(PlayerEvents.PGS_SUBTITLE_ARRIVED, pgs_data);
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED,
       (synchronous_klv_metadata: any) => {
         this._emitter.emit(
           PlayerEvents.SYNCHRONOUS_KLV_METADATA_ARRIVED,
-          synchronous_klv_metadata,
+          synchronous_klv_metadata
         );
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.ASYNCHRONOUS_KLV_METADATA_ARRIVED,
       (asynchronous_klv_metadata: any) => {
         this._emitter.emit(
           PlayerEvents.ASYNCHRONOUS_KLV_METADATA_ARRIVED,
-          asynchronous_klv_metadata,
+          asynchronous_klv_metadata
         );
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.SMPTE2038_METADATA_ARRIVED,
       (smpte2038_metadata: any) => {
         this._emitter.emit(
           PlayerEvents.SMPTE2038_METADATA_ARRIVED,
-          smpte2038_metadata,
+          smpte2038_metadata
         );
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.SCTE35_METADATA_ARRIVED,
       (scte35_metadata: any) => {
         this._emitter.emit(
           PlayerEvents.SCTE35_METADATA_ARRIVED,
-          scte35_metadata,
+          scte35_metadata
         );
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.PES_PRIVATE_DATA_DESCRIPTOR,
       (descriptor: any) => {
         this._emitter.emit(
           PlayerEvents.PES_PRIVATE_DATA_DESCRIPTOR,
-          descriptor,
+          descriptor
         );
-      },
+      }
     );
     this._transmuxer.on(
       TransmuxingEvents.PES_PRIVATE_DATA_ARRIVED,
       (private_data: any) => {
         this._emitter.emit(PlayerEvents.PES_PRIVATE_DATA_ARRIVED, private_data);
-      },
+      }
     );
 
     this._seeking_handler = new SeekingHandler(
       this._config,
       this._media_element,
-      this._onRequiredUnbufferedSeek.bind(this),
+      this._onRequiredUnbufferedSeek.bind(this)
     );
 
     this._loading_controller = new LoadingController(
       this._config,
       this._media_element,
       this._onRequestPauseTransmuxer.bind(this),
-      this._onRequestResumeTransmuxer.bind(this),
+      this._onRequestResumeTransmuxer.bind(this)
     );
 
     this._startup_stall_jumper = new StartupStallJumper(
       this._media_element,
-      this._onRequestDirectSeek.bind(this),
+      this._onRequestDirectSeek.bind(this)
     );
 
     if (this._config.isLive && this._config.liveBufferLatencyChasing) {
       this._live_latency_chaser = new LiveLatencyChaser(
         this._config,
         this._media_element,
-        this._onRequestDirectSeek.bind(this),
+        this._onRequestDirectSeek.bind(this)
       );
     }
 
     if (this._config.isLive && this._config.liveSync) {
       this._live_latency_synchronizer = new LiveLatencySynchronizer(
         this._config,
-        this._media_element,
+        this._media_element
       );
     }
 
@@ -424,6 +478,14 @@ class PlayerEngineMainThread implements PlayerEngine {
 
     this._seeking_handler?.destroy();
     this._seeking_handler = null;
+
+    // Stop and destroy soft audio decoder
+    if (this._soft_audio_decoder) {
+      this._soft_audio_decoder.stop();
+      this._soft_audio_decoder.destroy();
+      this._soft_audio_decoder = null;
+    }
+    this._soft_decode_codec = null;
 
     this._mse_controller?.flush();
 
@@ -486,7 +548,7 @@ class PlayerEngineMainThread implements PlayerEngine {
       PlayerEvents.ERROR,
       ErrorTypes.MEDIA_ERROR,
       ErrorDetails.MEDIA_MSE_ERROR,
-      info,
+      info
     );
   }
 
@@ -501,7 +563,7 @@ class PlayerEngineMainThread implements PlayerEngine {
     }
     Log.v(
       this.TAG,
-      "Resume transmuxing task due to ManagedMediaSource onStartStreaming",
+      "Resume transmuxing task due to ManagedMediaSource onStartStreaming"
     );
     this._loading_controller.resumeTransmuxer();
   }
@@ -513,7 +575,7 @@ class PlayerEngineMainThread implements PlayerEngine {
     }
     Log.v(
       this.TAG,
-      "Suspend transmuxing task due to ManagedMediaSource onEndStreaming",
+      "Suspend transmuxing task due to ManagedMediaSource onEndStreaming"
     );
     this._loading_controller.suspendTransmuxer();
   }
@@ -572,6 +634,146 @@ class PlayerEngineMainThread implements PlayerEngine {
 
     return stat_info;
   }
+
+  // ==================== Soft Audio Decoder Methods ====================
+
+  /**
+   * Check media info and initialize soft audio decoder if needed
+   */
+  private _checkAndInitSoftAudioDecoder(mediaInfo: MediaInfo): void {
+    if (!this._config.enableSoftAudioDecode) {
+      return;
+    }
+
+    // Identify audio codec from media info
+    const audioCodec = (mediaInfo as any).audioCodec;
+    const audioObjectType = (mediaInfo as any).audioObjectType;
+
+    const softDecodeCodec = identifyAudioCodec(audioCodec, audioObjectType);
+
+    if (softDecodeCodec && needsSoftwareDecode(softDecodeCodec)) {
+      Log.i(this.TAG, `Audio codec ${softDecodeCodec} needs software decoding`);
+      this._soft_decode_codec = softDecodeCodec;
+      this._initSoftAudioDecoder(softDecodeCodec);
+    }
+  }
+
+  /**
+   * Initialize soft audio decoder
+   * Now only initializes the PCM player, decoding is done in worker
+   */
+  private async _initSoftAudioDecoder(
+    codec: SoftDecodeAudioCodec
+  ): Promise<void> {
+    if (this._soft_decode_pending_init) {
+      return;
+    }
+
+    this._soft_decode_pending_init = true;
+
+    try {
+      const wasmPath = this._config.softDecodeWasmPath || "/wasm/";
+
+      // Initialize audio decoder in worker
+      this._transmuxer?.initAudioDecoder({ wasmPath });
+
+      // Create decoder manager (PCM player only, no WASM loaders needed)
+      this._soft_audio_decoder = new SoftAudioDecoderManager({
+        playerConfig: {
+          enableSync: true,
+          maxBackwardBufferDuration: this._config.autoCleanupMaxBackwardDuration,
+          minBackwardBufferDuration: this._config.autoCleanupMinBackwardDuration,
+          enableBufferSeek: true,
+        },
+      });
+
+      // Attach video element for A/V sync
+      if (this._media_element instanceof HTMLVideoElement) {
+        this._soft_audio_decoder.attachVideo(this._media_element);
+      }
+
+      // Initialize PCM player only (no codec-specific decoder needed)
+      await this._soft_audio_decoder.initPCMPlayer();
+
+      Log.i(
+        this.TAG,
+        `Soft audio decoder initialized for ${codec} (worker mode)`
+      );
+
+      // Enable soft decode mode in transmuxer
+      this._transmuxer?.setSoftDecodeMode(codec);
+
+      // Sync initial volume/muted state
+      if (this._media_element) {
+        this._soft_audio_decoder.setVolume(this._media_element.volume);
+        this._soft_audio_decoder.setMuted(this._media_element.muted);
+      }
+
+      // Emit event
+      this._emitter.emit(PlayerEvents.AUDIO_SOFT_DECODE_REQUIRED, codec);
+    } catch (err) {
+      Log.e(this.TAG, `Error initializing soft audio decoder: ${err}`);
+      this._soft_audio_decoder = null;
+    } finally {
+      this._soft_decode_pending_init = false;
+    }
+  }
+
+  /**
+   * Handle raw audio data from transmuxer (fallback if worker decode fails)
+   */
+  private _onRawAudioData(frame: RawAudioFrame): void {
+    // This is a fallback path - normally audio is decoded in worker
+    // and we receive PCM_AUDIO_DATA instead
+    if (this._soft_audio_decoder && this._soft_audio_decoder.isActive()) {
+      this._soft_audio_decoder.decode(frame.data, frame.pts);
+    }
+  }
+
+  /**
+   * Handle decoded PCM audio data from worker
+   */
+  private _onPCMAudioData(pcmData: any): void {
+    if (this._soft_audio_decoder) {
+      // Feed PCM data directly to player (decoded in worker)
+      this._soft_audio_decoder.feedPCM(
+        pcmData.pcm,
+        pcmData.channels,
+        pcmData.sampleRate,
+        pcmData.pts
+      );
+    }
+  }
+
+  /**
+   * Handle video element volume change - sync to soft audio decoder
+   */
+  private _onVolumeChange(): void {
+    if (this._soft_audio_decoder && this._media_element) {
+      this._soft_audio_decoder.setVolume(this._media_element.volume);
+      this._soft_audio_decoder.setMuted(this._media_element.muted);
+    }
+  }
+
+  /**
+   * Handle video element play event - resume soft audio decoder
+   */
+  private _onPlay(): void {
+    if (this._soft_audio_decoder) {
+      this._soft_audio_decoder.play();
+    }
+  }
+
+  /**
+   * Handle video element pause event - pause soft audio decoder
+   */
+  private _onPause(): void {
+    if (this._soft_audio_decoder) {
+      this._soft_audio_decoder.pause();
+    }
+  }
+
+  // Note: seeking is handled by PCMAudioPlayer's own video event listeners
 }
 
 export default PlayerEngineMainThread;

@@ -25,6 +25,19 @@ import { ErrorTypes, ErrorDetails } from "./player/player-errors.js";
 import LoggingControl from "./utils/logging-control.js";
 import { InvalidArgumentException } from "./utils/exception.js";
 
+// Software audio decoder support
+import {
+  SoftAudioDecoderManager,
+  MpegAudioDecoder,
+  AC3Decoder,
+  getCodecSupport,
+  needsSoftwareDecode,
+  isMp2Supported,
+  isAc3Supported,
+  isEac3Supported,
+} from "./decoder/index";
+import { PCMAudioPlayer } from "./audio/index";
+
 // here are all the interfaces
 
 // factory method
@@ -81,6 +94,17 @@ mpegts.ErrorDetails = ErrorDetails;
 mpegts.MSEPlayer = MSEPlayer;
 // mpegts.NativePlayer = NativePlayer;
 mpegts.LoggingControl = LoggingControl;
+
+// Software audio decoder exports
+mpegts.SoftAudioDecoderManager = SoftAudioDecoderManager;
+mpegts.MpegAudioDecoder = MpegAudioDecoder;
+mpegts.AC3Decoder = AC3Decoder;
+mpegts.PCMAudioPlayer = PCMAudioPlayer;
+mpegts.getCodecSupport = getCodecSupport;
+mpegts.needsSoftwareDecode = needsSoftwareDecode;
+mpegts.isMp2Supported = isMp2Supported;
+mpegts.isAc3Supported = isAc3Supported;
+mpegts.isEac3Supported = isEac3Supported;
 
 Object.defineProperty(mpegts, "version", {
   enumerable: true,

@@ -33,6 +33,10 @@ enum PlayerEvents {
   PES_PRIVATE_DATA_ARRIVED = "pes_private_data_arrived",
   STATISTICS_INFO = "statistics_info",
   DESTROYING = "destroying",
+  /** Emitted when audio codec requires software decoding */
+  AUDIO_SOFT_DECODE_REQUIRED = "audio_soft_decode_required",
+  /** Raw audio frame data for software decoding */
+  RAW_AUDIO_DATA = "raw_audio_data",
 }
 
 export default PlayerEvents;

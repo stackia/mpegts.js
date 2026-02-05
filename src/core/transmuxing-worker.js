@@ -20,6 +20,7 @@ import Log from "../utils/logger.js";
 import LoggingControl from "../utils/logging-control.js";
 import TransmuxingController from "./transmuxing-controller.js";
 import TransmuxingEvents from "./transmuxing-events";
+import { WorkerAudioDecoder } from "../decoder/worker-audio-decoder";
 
 /* post message to worker:
    data: {
@@ -36,12 +37,19 @@ import TransmuxingEvents from "./transmuxing-events";
 
 let TAG = "TransmuxingWorker";
 let controller = null;
+let audioDecoder = null;
+let softDecodeConfig = null;
 let logcatListener = onLogcatCallback.bind(this);
 
 self.addEventListener("message", function (e) {
   switch (e.data.cmd) {
     case "init":
-      controller = new TransmuxingController(e.data.param[0], e.data.param[1]);
+      // Save config for audio decoder
+      const config = e.data.param[1];
+      softDecodeConfig = {
+        wasmPath: config.softDecodeWasmPath || "/wasm/",
+      };
+      controller = new TransmuxingController(e.data.param[0], config);
       controller.on(TransmuxingEvents.IO_ERROR, onIOError.bind(this));
       controller.on(TransmuxingEvents.DEMUX_ERROR, onDemuxError.bind(this));
       controller.on(TransmuxingEvents.INIT_SEGMENT, onInitSegment.bind(this));
@@ -103,8 +111,16 @@ self.addEventListener("message", function (e) {
         TransmuxingEvents.RECOMMEND_SEEKPOINT,
         onRecommendSeekpoint.bind(this)
       );
+      controller.on(
+        TransmuxingEvents.RAW_AUDIO_DATA,
+        onRawAudioData.bind(this)
+      );
       break;
     case "destroy":
+      if (audioDecoder) {
+        audioDecoder.destroy();
+        audioDecoder = null;
+      }
       if (controller) {
         controller.destroy();
         controller = null;
@@ -137,6 +153,15 @@ self.addEventListener("message", function (e) {
       }
       break;
     }
+    case "soft_decode_mode":
+      if (controller) {
+        controller.setSoftDecodeMode(e.data.param);
+      }
+      break;
+    case "init_audio_decoder":
+      // Initialize audio decoder in worker with config
+      softDecodeConfig = e.data.param;
+      break;
   }
 });
 
@@ -307,4 +332,62 @@ function onLogcatCallback(type, str) {
       logcat: str,
     },
   });
+}
+
+// Track pending decoder initialization to avoid duplicate init calls
+let audioDecoderInitPending = false;
+let audioDecoderInitCodec = null;
+
+async function onRawAudioData(frame) {
+  // Determine codec from frame
+  const codec = frame.codec || "mp2";
+
+  // Initialize audio decoder if not already done
+  if (!audioDecoder) {
+    const wasmPath = softDecodeConfig?.wasmPath || "/wasm/";
+    audioDecoder = new WorkerAudioDecoder({ wasmPath });
+  }
+
+  // Initialize decoder for this codec if needed (only once)
+  if (audioDecoder && !audioDecoder.isActive() && !audioDecoderInitPending) {
+    audioDecoderInitPending = true;
+    audioDecoderInitCodec = codec;
+    const success = await audioDecoder.initDecoder(codec);
+    audioDecoderInitPending = false;
+    if (!success) {
+      Log.w(TAG, `Failed to initialize audio decoder for ${codec}`);
+      return;
+    }
+  }
+
+  // If initialization is pending, skip this frame
+  if (audioDecoderInitPending) {
+    return;
+  }
+
+  // Decode audio in worker
+  if (audioDecoder && audioDecoder.isActive()) {
+    const pcmData = audioDecoder.decode(frame.data, frame.pts);
+    if (pcmData) {
+      // Send decoded PCM data to main thread
+      let obj = {
+        msg: TransmuxingEvents.PCM_AUDIO_DATA,
+        data: pcmData,
+      };
+      // Transfer the PCM buffer to avoid copy
+      self.postMessage(obj, [pcmData.pcm.buffer]);
+      return;
+    }
+  }
+
+  // Fallback: send raw audio data to main thread (for backwards compatibility)
+  let obj = {
+    msg: TransmuxingEvents.RAW_AUDIO_DATA,
+    data: frame,
+  };
+  if (frame.data && frame.data.buffer) {
+    self.postMessage(obj, [frame.data.buffer]);
+  } else {
+    self.postMessage(obj);
+  }
 }

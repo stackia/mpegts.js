@@ -36,6 +36,12 @@ enum TransmuxingEvents {
   PES_PRIVATE_DATA_ARRIVED = "pes_private_data_arrived",
   STATISTICS_INFO = "statistics_info",
   RECOMMEND_SEEKPOINT = "recommend_seekpoint",
+  /** Raw audio frame data for software decoding (MP2, AC-3, etc.) */
+  RAW_AUDIO_DATA = "raw_audio_data",
+  /** Audio codec requires software decoding notification */
+  AUDIO_SOFT_DECODE_REQUIRED = "audio_soft_decode_required",
+  /** Decoded PCM audio data from worker */
+  PCM_AUDIO_DATA = "pcm_audio_data",
 }
 
 export default TransmuxingEvents;

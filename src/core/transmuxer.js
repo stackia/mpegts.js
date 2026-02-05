@@ -193,6 +193,18 @@ class Transmuxer {
     }
   }
 
+  /**
+   * Enable soft decode mode for a specific audio codec
+   * @param {string} codec - The audio codec to soft decode ("mp2" or "ac-3" or null to disable)
+   */
+  setSoftDecodeMode(codec) {
+    if (this._worker) {
+      this._worker.postMessage({ cmd: "soft_decode_mode", param: codec });
+    } else if (this._controller) {
+      this._controller.setSoftDecodeMode(codec);
+    }
+  }
+
   _onInitSegment(type, initSegment) {
     // do async invoke
     Promise.resolve().then(() => {
@@ -364,11 +376,47 @@ class Transmuxer {
       case TransmuxingEvents.RECOMMEND_SEEKPOINT:
         this._emitter.emit(message.msg, data);
         break;
+      case TransmuxingEvents.RAW_AUDIO_DATA:
+        // Reconstruct Uint8Array from transferred buffer
+        if (data.data && !(data.data instanceof Uint8Array)) {
+          data.data = new Uint8Array(data.data);
+        }
+        this._emitter.emit(message.msg, data);
+        break;
+      case TransmuxingEvents.PCM_AUDIO_DATA:
+        // Reconstruct Float32Array from transferred buffer
+        if (data.pcm && !(data.pcm instanceof Float32Array)) {
+          data.pcm = new Float32Array(data.pcm);
+        }
+        this._emitter.emit(message.msg, data);
+        break;
       case "logcat_callback":
         Log.emitter.emit("log", data.type, data.logcat);
         break;
       default:
         break;
+    }
+  }
+
+  _onRawAudioData(data) {
+    Promise.resolve().then(() => {
+      this._emitter.emit(TransmuxingEvents.RAW_AUDIO_DATA, data);
+    });
+  }
+
+  _onPCMAudioData(data) {
+    Promise.resolve().then(() => {
+      this._emitter.emit(TransmuxingEvents.PCM_AUDIO_DATA, data);
+    });
+  }
+
+  /**
+   * Initialize audio decoder in worker
+   * @param {Object} config - Audio decoder config { wasmPath: string }
+   */
+  initAudioDecoder(config) {
+    if (this._worker) {
+      this._worker.postMessage({ cmd: "init_audio_decoder", param: config });
     }
   }
 }

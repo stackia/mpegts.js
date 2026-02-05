@@ -348,6 +348,8 @@ class TransmuxingController {
     demuxer.onPESPrivateDataDescriptor =
       this._onPESPrivateDataDescriptor.bind(this);
     demuxer.onPESPrivateData = this._onPESPrivateData.bind(this);
+    // Soft decode support: raw audio data callback
+    demuxer.onRawAudioData = this._onRawAudioData.bind(this);
 
     this._remuxer.bindDataSource(this._demuxer);
     this._demuxer.bindDataSource(this._ioctl);
@@ -355,6 +357,24 @@ class TransmuxingController {
     this._remuxer.onInitSegment = this._onRemuxerInitSegmentArrival.bind(this);
     this._remuxer.onMediaSegment =
       this._onRemuxerMediaSegmentArrival.bind(this);
+  }
+
+  /**
+   * Enable soft decode mode for a specific audio codec
+   * @param {string} codec - The audio codec to soft decode ("mp2" or "ac-3")
+   */
+  setSoftDecodeMode(codec) {
+    if (this._demuxer && typeof this._demuxer.setSoftDecodeMode === "function") {
+      this._demuxer.setSoftDecodeMode(codec);
+    }
+  }
+
+  /**
+   * Raw audio data callback for soft decoding
+   * @param {Object} frame - Raw audio frame data
+   */
+  _onRawAudioData(frame) {
+    this._emitter.emit(TransmuxingEvents.RAW_AUDIO_DATA, frame);
   }
 
   _onMediaInfo(mediaInfo) {

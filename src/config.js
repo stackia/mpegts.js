@@ -58,6 +58,10 @@ export const defaultConfig = {
 
   headers: undefined,
   customLoader: undefined,
+
+  // Soft audio decoding options
+  enableSoftAudioDecode: true, // Enable software audio decoding for unsupported codecs (MP2, AC-3)
+  softDecodeWasmPath: "/wasm/", // Path to WASM decoder files (mp2_decoder.js, ac3_decoder.js)
 };
 
 export function createDefaultConfig() {

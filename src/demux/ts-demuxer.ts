@@ -75,6 +75,21 @@ import { KLVData, klv_parse } from "./klv";
 // import AV1OBUParser from "./av1-parser";
 import { PGSData } from "./pgs-data";
 
+/**
+ * Raw audio frame data for software decoding
+ */
+export type RawAudioFrame = {
+  codec: "mp2" | "ac-3";
+  data: Uint8Array;
+  pts: number;
+  sampleRate: number;
+  channels: number;
+  /** MPEG layer for mp2 (1, 2, or 3) */
+  layer?: number;
+  /** Bitrate in kbps */
+  bitRate?: number;
+};
+
 type AdaptationFieldInfo = {
   discontinuity_indicator?: number;
   random_access_indicator?: number;
@@ -216,6 +231,14 @@ class TSDemuxer extends BaseDemuxer {
     length: 0,
   };
 
+  // Soft decode mode support
+  private soft_decode_audio_codec_: "mp2" | "ac-3" | null = null;
+
+  /**
+   * Callback for raw audio frames when soft decode mode is enabled
+   */
+  public onRawAudioData: ((frame: RawAudioFrame) => void) | null = null;
+
   public constructor(probe_data: any, config: any) {
     super();
 
@@ -236,7 +259,40 @@ class TSDemuxer extends BaseDemuxer {
     this.video_track_ = null;
     this.audio_track_ = null;
 
+    this.soft_decode_audio_codec_ = null;
+    this.onRawAudioData = null;
+
     super.destroy();
+  }
+
+  /**
+   * Enable soft decode mode for a specific audio codec.
+   * When enabled, raw audio frames will be sent via onRawAudioData callback
+   * instead of being pushed to the remuxer.
+   *
+   * @param codec - The audio codec to soft decode ("mp2" or "ac-3")
+   */
+  public setSoftDecodeMode(codec: "mp2" | "ac-3" | null): void {
+    this.soft_decode_audio_codec_ = codec;
+    if (codec) {
+      Log.i(this.TAG, `Soft decode mode enabled for codec: ${codec}`);
+    } else {
+      Log.i(this.TAG, `Soft decode mode disabled`);
+    }
+  }
+
+  /**
+   * Check if soft decode mode is currently enabled
+   */
+  public isSoftDecodeMode(): boolean {
+    return this.soft_decode_audio_codec_ !== null;
+  }
+
+  /**
+   * Get the current soft decode audio codec
+   */
+  public getSoftDecodeCodec(): "mp2" | "ac-3" | null {
+    return this.soft_decode_audio_codec_;
   }
 
   public static probe(buffer: ArrayBuffer) {
@@ -1915,6 +1971,62 @@ class TSDemuxer extends BaseDemuxer {
       }
     }
 
+    // Check if soft decode is needed for AC-3
+    // Auto-enable soft decode when AC-3 is detected and onRawAudioData callback is set
+    if (this.onRawAudioData && this.soft_decode_audio_codec_ !== "ac-3") {
+      this.soft_decode_audio_codec_ = "ac-3";
+      Log.i(this.TAG, `Auto-enabled soft decode mode for AC-3`);
+    }
+
+    if (this.soft_decode_audio_codec_ === "ac-3" && this.onRawAudioData) {
+      // Parse the first frame to get metadata
+      let adts_parser = new AC3Parser(data);
+      let ac3_frame = adts_parser.readNextAC3Frame();
+
+      if (ac3_frame) {
+        // Dispatch audio init segment for MediaInfo (only once)
+        if (this.audio_init_segment_dispatched_ == false) {
+          const audio_sample = {
+            codec: "ac-3",
+            data: ac3_frame,
+          } as const;
+
+          this.audio_metadata_ = {
+            codec: "ac-3",
+            sampling_frequency: ac3_frame.sampling_frequency,
+            bit_stream_identification: ac3_frame.bit_stream_identification,
+            bit_stream_mode: ac3_frame.bit_stream_mode,
+            low_frequency_effects_channel_on:
+              ac3_frame.low_frequency_effects_channel_on,
+            channel_mode: ac3_frame.channel_mode,
+          };
+          this.dispatchAudioInitSegment(audio_sample);
+        }
+
+        // Get channel count from channel mode
+        // AC-3 channel modes: 0=1/0, 1=1/0, 2=2/0, 3=3/0, 4=2/1, 5=3/1, 6=2/2, 7=3/2
+        const acmodChannels = [2, 1, 2, 3, 3, 4, 4, 5];
+        let channels = acmodChannels[ac3_frame.channel_mode] || 2;
+        if (ac3_frame.low_frequency_effects_channel_on) {
+          channels += 1;
+        }
+
+        // Send raw frame via callback
+        const pts_ms = Math.floor(base_pts_ms);
+        const rawFrame: RawAudioFrame = {
+          codec: "ac-3",
+          data: data, // Send the original data, not parsed frame
+          pts: pts_ms,
+          sampleRate: ac3_frame.sampling_frequency,
+          channels: channels,
+        };
+        this.onRawAudioData(rawFrame);
+
+        this.audio_last_sample_pts_ = pts_ms;
+      }
+      return; // Don't push to audio track for remuxing
+    }
+
     let adts_parser = new AC3Parser(data);
     let ac3_frame: AC3Frame = null;
     let sample_pts_ms = base_pts_ms;
@@ -2139,6 +2251,7 @@ class TSDemuxer extends BaseDemuxer {
     let sample_rate = 0;
     let bit_rate = 0;
     let object_type = 34; // Layer-3, listed in MPEG-4 Audio Object Types
+    let layerNumber = 3; // Default to layer 3
 
     let codec = "mp3";
     switch (ver) {
@@ -2156,22 +2269,77 @@ class TSDemuxer extends BaseDemuxer {
     switch (layer) {
       case 1: // Layer 3
         object_type = 34;
+        layerNumber = 3;
         if (bitrate_index < _mpegAudioL3BitRateTable.length) {
           bit_rate = _mpegAudioL3BitRateTable[bitrate_index];
         }
         break;
       case 2: // Layer 2
         object_type = 33;
+        layerNumber = 2;
         if (bitrate_index < _mpegAudioL2BitRateTable.length) {
           bit_rate = _mpegAudioL2BitRateTable[bitrate_index];
         }
         break;
       case 3: // Layer 1
         object_type = 32;
+        layerNumber = 1;
         if (bitrate_index < _mpegAudioL1BitRateTable.length) {
           bit_rate = _mpegAudioL1BitRateTable[bitrate_index];
         }
         break;
+    }
+
+    // Check if soft decode is needed for MP2
+    // object_type 33 = Layer 2 (MP2)
+    // Auto-enable soft decode when MP2 is detected and onRawAudioData callback is set
+    if (object_type === 33 && this.onRawAudioData) {
+      // Auto-enable soft decode mode for MP2 if not already set
+      if (this.soft_decode_audio_codec_ !== "mp2") {
+        this.soft_decode_audio_codec_ = "mp2";
+        Log.i(this.TAG, `Auto-enabled soft decode mode for MP2`);
+      }
+    }
+
+    if (
+      this.soft_decode_audio_codec_ === "mp2" &&
+      object_type === 33 &&
+      this.onRawAudioData
+    ) {
+      const pts_ms = Math.floor(pts / this.timescale_);
+      const rawFrame: RawAudioFrame = {
+        codec: "mp2",
+        data: data,
+        pts: pts_ms,
+        sampleRate: sample_rate,
+        channels: channel_count,
+        layer: layerNumber,
+        bitRate: bit_rate,
+      };
+      this.onRawAudioData(rawFrame);
+
+      // Still need to dispatch audio init segment for MediaInfo
+      // but don't push samples to audio track
+      const sample = new MP3Data();
+      sample.object_type = object_type;
+      sample.sample_rate = sample_rate;
+      sample.channel_count = channel_count;
+      sample.data = data;
+      const audio_sample = {
+        codec: "mp3",
+        data: sample,
+      } as const;
+
+      if (this.audio_init_segment_dispatched_ == false) {
+        this.audio_metadata_ = {
+          codec: "mp3",
+          object_type,
+          sample_rate,
+          channel_count,
+        };
+        this.dispatchAudioInitSegment(audio_sample);
+      }
+      return; // Don't push to audio track for remuxing
     }
 
     const sample = new MP3Data();
@@ -2412,6 +2580,7 @@ class TSDemuxer extends BaseDemuxer {
       meta.codec = "mp3";
       meta.originalCodec = "mp3";
       meta.config = undefined;
+      meta.audioObjectType = this.audio_metadata_.object_type; // 32=Layer1, 33=Layer2/MP2, 34=Layer3
     }
 
     if (this.audio_init_segment_dispatched_ == false) {
@@ -2421,16 +2590,53 @@ class TSDemuxer extends BaseDemuxer {
       );
     }
 
-    this.onTrackMetadata("audio", meta);
+    // When soft decode mode is enabled, send a fake AAC audio track metadata
+    // This creates an audio SourceBuffer with silent frames to prevent Chrome from
+    // pausing video when tab goes to background (Chrome pauses "silent" videos)
+    const isSoftDecodeMode = this.soft_decode_audio_codec_ !== null;
+    if (!isSoftDecodeMode) {
+      this.onTrackMetadata("audio", meta);
+    } else {
+      Log.v(
+        this.TAG,
+        `Soft decode mode enabled, sending silent AAC audio track metadata`
+      );
+      // Create a fake AAC-LC stereo metadata for silent audio track
+      // AudioSpecificConfig for AAC-LC 48kHz stereo:
+      // - audio_object_type = 2 (AAC-LC) -> 5 bits: 00010
+      // - sampling_frequency_index = 3 (48000Hz) -> 4 bits: 0011
+      // - channel_configuration = 2 (stereo) -> 4 bits: 0010
+      // Total: 00010 0011 0010 0000 = 0x11 0x90
+      const silentMeta: any = {
+        type: "audio",
+        id: this.audio_track_.id,
+        timescale: 1000,
+        duration: this.duration_,
+        audioSampleRate: 48000,
+        channelCount: 2,
+        codec: "mp4a.40.2", // AAC-LC
+        originalCodec: "mp4a.40.2",
+        config: [0x11, 0x90], // AAC-LC 48kHz stereo (as Array, not Uint8Array)
+        refSampleDuration: (1024 / 48000) * 1000, // ~21.33ms
+        // Mark this as silent audio mode for remuxer
+        silentAudioMode: true,
+      };
+      this.onTrackMetadata("audio", silentMeta);
+    }
+
     this.audio_init_segment_dispatched_ = true;
     this.video_metadata_changed_ = false;
 
-    // notify new MediaInfo
+    // notify new MediaInfo (always needed for soft decode detection)
     let mi = this.media_info_;
     mi.hasAudio = true;
     mi.audioCodec = meta.originalCodec;
     mi.audioSampleRate = meta.audioSampleRate;
     mi.audioChannelCount = meta.channelCount;
+    // Pass audioObjectType for MP2/MP3 distinction
+    if (meta.audioObjectType !== undefined) {
+      (mi as any).audioObjectType = meta.audioObjectType;
+    }
 
     if (mi.hasVideo && mi.videoCodec) {
       mi.mimeType = `video/mp2t; codecs="${mi.videoCodec},${mi.audioCodec}"`;

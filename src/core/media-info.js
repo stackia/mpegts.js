@@ -30,6 +30,7 @@ class MediaInfo {
 
     this.audioSampleRate = null;
     this.audioChannelCount = null;
+    this.audioObjectType = null; // MPEG-4 Audio Object Type (32=Layer1, 33=Layer2/MP2, 34=Layer3/MP3)
 
     this.width = null;
     this.height = null;
