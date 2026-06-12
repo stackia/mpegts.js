@@ -77,8 +77,16 @@ export function createMpegtsPlayer(
 				break;
 			case "media-info":
 				break;
-			case "hls-detected":
-				impl.onHLSDetected?.();
+			case "seek-handled":
+				mse?.flush();
+				destroyPCMPlayer();
+				// Fresh remuxer rebases MP4 timestamps to 0; move playhead there
+				video.currentTime = 0;
+				break;
+			case "seek-not-handled":
+				for (const h of seekHandlers) {
+					h(msg.time);
+				}
 				break;
 			case "pcm-audio-data": {
 				const player = ensurePCMPlayer();
@@ -130,6 +138,11 @@ export function createMpegtsPlayer(
 			worker?.postMessage(cmd);
 		};
 
+		mse.onBufferAvailable = () => {
+			const cmd: WorkerCommand = { type: "resume" };
+			worker?.postMessage(cmd);
+		};
+
 		mse.onError = (info) => {
 			impl.onError?.({
 				category: "media",
@@ -177,9 +190,10 @@ export function createMpegtsPlayer(
 			if (isBuffered(video, seconds)) {
 				video.currentTime = seconds;
 			} else {
-				for (const h of seekHandlers) {
-					h(seconds);
-				}
+				// Send seek to worker; it will either handle it (HLS) or respond
+				// with seek-not-handled (non-HLS) so we can emit seek-needed.
+				const cmd: WorkerCommand = { type: "seek", time: seconds };
+				worker?.postMessage(cmd);
 			}
 		},
 

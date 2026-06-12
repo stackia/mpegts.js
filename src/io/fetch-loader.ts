@@ -58,7 +58,7 @@ class FetchLoader {
 	onSeeked: (() => void) | null;
 	onError: ((type: string, info: LoaderErrorInfo) => void) | null;
 	onComplete: ((extraData: unknown) => void) | null;
-	onHLSDetected: (() => void) | null;
+	onHLSManifest: ((text: string, responseURL: string) => void) | null;
 
 	// --- config / data source ---
 	private _config: PlayerConfig;
@@ -114,7 +114,7 @@ class FetchLoader {
 		this.onSeeked = null;
 		this.onError = null;
 		this.onComplete = null;
-		this.onHLSDetected = null;
+		this.onHLSManifest = null;
 	}
 
 	destroy(): void {
@@ -132,7 +132,7 @@ class FetchLoader {
 		this.onSeeked = null;
 		this.onError = null;
 		this.onComplete = null;
-		this.onHLSDetected = null;
+		this.onHLSManifest = null;
 
 		this._extraData = null;
 	}
@@ -284,9 +284,11 @@ class FetchLoader {
 					// detect HLS content-type before processing body
 					const ct = res.headers.get("Content-Type")?.toLowerCase() ?? "";
 					if (ct.includes("mpegurl") || ct.includes("m3u")) {
-						res.body?.cancel();
 						this._status = LoaderStatus.kIdle;
-						this.onHLSDetected?.();
+						const responseURL = res.url || sourceURL;
+						res.text().then((text) => {
+							this.onHLSManifest?.(text, responseURL);
+						});
 						return;
 					}
 

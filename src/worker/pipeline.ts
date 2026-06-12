@@ -4,6 +4,7 @@ import MediaInfo from "../core/media-info";
 import { WorkerAudioDecoder } from "../decoder/worker-audio-decoder";
 import DemuxErrors from "../demux/demux-errors";
 import TSDemuxer from "../demux/ts-demuxer";
+import { parseM3U8 } from "../hls/m3u8-parser";
 import FetchLoader from "../io/fetch-loader";
 import MP4Remuxer from "../remux/mp4-remuxer";
 import type { PlayerSegment } from "../types";
@@ -32,7 +33,6 @@ export interface PipelineCallbacks {
 	onMediaInfo: (mediaInfo: unknown) => void;
 	onIOError: (type: string, info: { code: number; msg: string }) => void;
 	onDemuxError: (type: string, info: string) => void;
-	onHLSDetected: () => void;
 	onPCMAudioData: (pcm: Float32Array, channels: number, sampleRate: number, pts: number) => void;
 }
 
@@ -60,6 +60,18 @@ class Pipeline {
 	private _ioctl: FetchLoader | null;
 	private _workerAudioDecoder: WorkerAudioDecoder | null = null;
 	private _workerAudioDecoderInitPromise: Promise<boolean> | null = null;
+
+	// HLS state
+	private _isHLS = false;
+	private _hlsLive = false;
+	private _hlsManifestURL = "";
+	private _hlsTargetDuration = 0;
+	private _hlsNextSequence = 0;
+	private _hlsPollTimer: ReturnType<typeof setTimeout> | null = null;
+	private _hlsWaiting = false;
+	private _hlsCors = true;
+	private _hlsCredentials = false;
+	private _hlsReferrerPolicy?: ReferrerPolicy;
 
 	constructor(segments: PlayerSegment[], config: PlayerConfig, callbacks: PipelineCallbacks) {
 		this._callbacks = callbacks;
@@ -99,6 +111,7 @@ class Pipeline {
 	}
 
 	stop(): void {
+		this._stopHLSPoll();
 		this._internalAbort();
 	}
 
@@ -116,7 +129,16 @@ class Pipeline {
 
 	loadSegments(newSegments: PlayerSegment[]): void {
 		// Stop current loading
+		this._stopHLSPoll();
 		this._internalAbort();
+
+		// Reset HLS state
+		this._isHLS = false;
+		this._hlsLive = false;
+		this._hlsManifestURL = "";
+		this._hlsTargetDuration = 0;
+		this._hlsNextSequence = 0;
+		this._hlsWaiting = false;
 
 		// Reset internal state
 		this._mediaInfo = null;
@@ -126,23 +148,38 @@ class Pipeline {
 		this._currentSegmentIndex = 0;
 
 		// Destroy demuxer and remuxer for clean state (handles codec/container changes)
-		if (this._demuxer) {
-			this._demuxer.destroy();
-			this._demuxer = null;
-		}
-		if (this._remuxer) {
-			this._remuxer.destroy();
-			this._remuxer = null;
-		}
-
-		// Reset WASM audio decoder state (clear stale mdct/qmf from previous stream)
-		this._workerAudioDecoder?.reset();
+		this._resetDemuxPipeline();
 
 		// Start from segment 0 — will re-probe format and recreate demuxer+remuxer
 		this._loadSegment(0);
 	}
 
+	seek(seconds: number): boolean {
+		if (!this._isHLS) return false;
+
+		let accum = 0;
+		let targetIndex = 0;
+		for (let i = 0; i < this._segments.length; i++) {
+			if (accum + this._segments[i].duration > seconds) {
+				targetIndex = i;
+				break;
+			}
+			accum += this._segments[i].duration;
+			if (i === this._segments.length - 1) {
+				targetIndex = i;
+			}
+		}
+
+		this._internalAbort();
+		this._hlsWaiting = false;
+		this._resetDemuxPipeline();
+
+		this._loadSegment(targetIndex);
+		return true;
+	}
+
 	destroy(): void {
+		this._stopHLSPoll();
 		this._mediaInfo = null;
 
 		if (this._ioctl) {
@@ -183,10 +220,35 @@ class Pipeline {
 		ioctl.onError = this._onIOException.bind(this);
 		ioctl.onSeeked = this._onIOSeeked.bind(this);
 		ioctl.onComplete = this._onIOComplete.bind(this) as (extraData: unknown) => void;
-		ioctl.onHLSDetected = () => this._callbacks.onHLSDetected();
+		ioctl.onHLSManifest = (text, resolvedURL) => {
+			this._handleHLSManifest(text, resolvedURL, segment);
+		};
 
 		ioctl.onDataArrival = this._onInitChunkArrival.bind(this);
 		ioctl.open();
+	}
+
+	private _resetDemuxPipeline(): void {
+		if (this._demuxer) {
+			this._demuxer.destroy();
+			this._demuxer = null;
+		}
+		if (this._remuxer) {
+			this._remuxer.destroy();
+			this._remuxer = null;
+		}
+		this._workerAudioDecoder?.reset();
+	}
+
+	private _hlsSegment(seg: { url: string; duration: number }): InternalSegment {
+		return {
+			duration: seg.duration,
+			url: seg.url,
+			timestampBase: 0,
+			cors: this._hlsCors,
+			withCredentials: this._hlsCredentials,
+			referrerPolicy: this._hlsReferrerPolicy,
+		};
 	}
 
 	private _internalAbort(): void {
@@ -292,8 +354,8 @@ class Pipeline {
 		(this._remuxer as MP4Remuxer).insertDiscontinuity();
 	}
 
-	private _onIOComplete(extraData: number): void {
-		const segmentIndex = extraData;
+	private _onIOComplete(_extraData: number): void {
+		const segmentIndex = this._currentSegmentIndex;
 		const nextSegmentIndex = segmentIndex + 1;
 
 		if (nextSegmentIndex < this._segments.length) {
@@ -302,6 +364,9 @@ class Pipeline {
 				this._remuxer.flushStashedSamples();
 			}
 			this._loadSegment(nextSegmentIndex);
+		} else if (this._hlsLive) {
+			this._remuxer?.flushStashedSamples();
+			this._hlsWaiting = true;
 		} else {
 			if (this._remuxer) {
 				this._remuxer.flushStashedSamples();
@@ -345,6 +410,129 @@ class Pipeline {
 		delete exportInfo.segments;
 
 		this._callbacks.onMediaInfo(exportInfo);
+	}
+
+	// ---- HLS methods ----
+
+	private _handleHLSManifest(text: string, resolvedURL: string, originSegment: InternalSegment): void {
+		const playlist = parseM3U8(text, resolvedURL);
+		if (!playlist) {
+			this._callbacks.onDemuxError(DemuxErrors.FORMAT_UNSUPPORTED, "Invalid M3U8 playlist");
+			return;
+		}
+
+		this._isHLS = true;
+		this._hlsLive = !playlist.ended;
+		this._hlsManifestURL = resolvedURL;
+		this._hlsTargetDuration = playlist.targetDuration;
+		this._hlsCors = originSegment.cors;
+		this._hlsCredentials = originSegment.withCredentials;
+		this._hlsReferrerPolicy = originSegment.referrerPolicy;
+
+		this._segments = playlist.segments.map((seg) => this._hlsSegment(seg));
+
+		this._hlsNextSequence = playlist.mediaSequence + playlist.segments.length;
+
+		// Destroy the loader that fetched the manifest
+		this._internalAbort();
+
+		if (this._hlsLive) {
+			this._scheduleHLSPoll();
+		}
+
+		if (this._segments.length > 0) {
+			this._loadSegment(0);
+		}
+	}
+
+	private _scheduleHLSPoll(): void {
+		if (this._hlsPollTimer) return;
+		const interval = Math.max(this._hlsTargetDuration, 1) * 1000;
+		this._hlsPollTimer = setTimeout(() => {
+			this._hlsPollTimer = null;
+			this._pollHLSManifest();
+		}, interval);
+	}
+
+	private _stopHLSPoll(): void {
+		if (this._hlsPollTimer) {
+			clearTimeout(this._hlsPollTimer);
+			this._hlsPollTimer = null;
+		}
+	}
+
+	private _pruneOldSegments(): void {
+		// Keep at most 2 segments before the current one to limit memory growth
+		const keepFrom = Math.max(0, this._currentSegmentIndex - 2);
+		if (keepFrom > 0) {
+			this._segments.splice(0, keepFrom);
+			this._currentSegmentIndex -= keepFrom;
+		}
+	}
+
+	private _pollHLSManifest(): void {
+		const params: RequestInit = {
+			method: "GET",
+			mode: this._hlsCors ? "cors" : "same-origin",
+			cache: "no-cache",
+		};
+		if (this._hlsCredentials) {
+			params.credentials = "include";
+		}
+		if (this._hlsReferrerPolicy) {
+			params.referrerPolicy = this._hlsReferrerPolicy;
+		}
+
+		self
+			.fetch(this._hlsManifestURL, params)
+			.then((res) => res.text())
+			.then((text) => {
+				if (!this._isHLS) return; // destroyed or reset while fetch was in-flight
+
+				const playlist = parseM3U8(text, this._hlsManifestURL);
+				if (!playlist) {
+					this._scheduleHLSPoll();
+					return;
+				}
+
+				const firstNewIndex = this._hlsNextSequence - playlist.mediaSequence;
+				if (firstNewIndex < playlist.segments.length) {
+					const newSegs = playlist.segments.slice(firstNewIndex);
+					for (const seg of newSegs) {
+						this._segments.push(this._hlsSegment(seg));
+					}
+					this._hlsNextSequence = playlist.mediaSequence + playlist.segments.length;
+
+					// Prune old segments to avoid unbounded growth
+					this._pruneOldSegments();
+
+					if (this._hlsWaiting) {
+						this._hlsWaiting = false;
+						const nextIndex = this._currentSegmentIndex + 1;
+						if (nextIndex < this._segments.length) {
+							this._internalAbort();
+							this._loadSegment(nextIndex);
+						}
+					}
+				}
+
+				if (playlist.ended) {
+					this._hlsLive = false;
+					if (this._hlsWaiting) {
+						// Stream ended and we've loaded all segments
+						this._hlsWaiting = false;
+						this._remuxer?.flushStashedSamples();
+						this._callbacks.onLoadingComplete();
+					}
+				} else {
+					this._scheduleHLSPoll();
+				}
+			})
+			.catch(() => {
+				if (!this._isHLS) return;
+				// Fetch failed, retry on next poll
+				this._scheduleHLSPoll();
+			});
 	}
 
 	private _handleRawAudioFrame(frame: { codec: "mp2"; data: Uint8Array; pts: number }): void {

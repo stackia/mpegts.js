@@ -32,8 +32,10 @@ export interface MSE {
 	appendInit(track: Track, data: ArrayBuffer, codec: string, container: string): void;
 	appendMedia(track: Track, data: ArrayBuffer): void;
 	endOfStream(): void;
+	flush(): void;
 	destroy(): void;
 	onBufferFull: (() => void) | null;
+	onBufferAvailable: (() => void) | null;
 	onError: ((info: { code: number; msg: string }) => void) | null;
 }
 
@@ -120,7 +122,10 @@ export function createMSE(video: HTMLVideoElement, config: PlayerConfig): MSE {
 
 				try {
 					sb.appendBuffer(segment);
-					isBufferFull = false;
+					if (isBufferFull) {
+						isBufferFull = false;
+						mse.onBufferAvailable?.();
+					}
 				} catch (error: unknown) {
 					pendingSegments[track].unshift(segment);
 					if ((error as DOMException).code === 22) {
@@ -250,6 +255,7 @@ export function createMSE(video: HTMLVideoElement, config: PlayerConfig): MSE {
 
 	const mse: MSE = {
 		onBufferFull: null,
+		onBufferAvailable: null,
 		onError: null,
 
 		open(onOpen: () => void): void {
@@ -404,6 +410,24 @@ export function createMSE(video: HTMLVideoElement, config: PlayerConfig): MSE {
 			}
 		},
 
+		flush(): void {
+			const tracks: Track[] = ["video", "audio"];
+			for (const track of tracks) {
+				pendingSegments[track].length = 0;
+				pendingRemoveRanges[track].length = 0;
+
+				const sb = sourceBuffers[track];
+				if (sb) {
+					if (!sb.updating && sb.buffered.length > 0) {
+						sb.remove(0, Infinity);
+					} else if (sb.updating) {
+						pendingRemoveRanges[track].push({ start: 0, end: Infinity });
+					}
+				}
+			}
+			hasPendingEos = false;
+		},
+
 		destroy(): void {
 			if (mediaSource) {
 				const ms = mediaSource;
@@ -478,6 +502,7 @@ export function createMSE(video: HTMLVideoElement, config: PlayerConfig): MSE {
 			}
 
 			mse.onBufferFull = null;
+			mse.onBufferAvailable = null;
 			mse.onError = null;
 			sourceOpenCallback = null;
 		},

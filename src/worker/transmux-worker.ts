@@ -46,9 +46,6 @@ function createPipeline(segments: PlayerSegment[], config: PlayerConfig): Pipeli
 		onDemuxError(type, info) {
 			post({ type: "error", category: "demux", detail: type, info, gen });
 		},
-		onHLSDetected() {
-			post({ type: "hls-detected", gen });
-		},
 		onPCMAudioData(pcm, channels, sampleRate, pts) {
 			const buffer = pcm.buffer as ArrayBuffer;
 			post({ type: "pcm-audio-data", pcm: buffer, channels, sampleRate, pts, gen }, [buffer]);
@@ -72,6 +69,13 @@ self.addEventListener("message", (e: MessageEvent) => {
 		case "load-segments":
 			gen = cmd.gen;
 			pipeline?.loadSegments(cmd.segments);
+			break;
+		case "seek":
+			if (pipeline?.seek(cmd.time)) {
+				post({ type: "seek-handled", gen });
+			} else {
+				post({ type: "seek-not-handled", time: cmd.time, gen });
+			}
 			break;
 		case "pause":
 			pipeline?.pause();

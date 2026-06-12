@@ -7,6 +7,7 @@ export type WorkerCommand =
 	| { type: "load-segments"; segments: PlayerSegment[]; gen: number }
 	| { type: "pause" }
 	| { type: "resume" }
+	| { type: "seek"; time: number }
 	| { type: "destroy" };
 
 export type WorkerEvent =
@@ -15,5 +16,6 @@ export type WorkerEvent =
 	| { type: "media-info"; info: unknown; gen: number }
 	| { type: "complete"; gen: number }
 	| { type: "error"; category: "io" | "demux"; detail: string; info?: string; gen: number }
-	| { type: "hls-detected"; gen: number }
+	| { type: "seek-handled"; gen: number }
+	| { type: "seek-not-handled"; time: number; gen: number }
 	| { type: "pcm-audio-data"; pcm: ArrayBuffer; channels: number; sampleRate: number; pts: number; gen: number };
